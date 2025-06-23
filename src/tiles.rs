@@ -92,28 +92,28 @@ impl Game {
         for tile in tiles.iter_mut().flatten() {
             match (&tile.mode, &tile.content) {
                 (TileMode::Flagged, TileContent::Field(c)) => {
-                    tile.content = TileContent::Mistake(TileMistake::FlaggedField(*c))
+                    tile.content = TileContent::Mistake(TileMistake::FlaggedField(*c));
                 }
-                (TileMode::Revealed | TileMode::Hidden, TileContent::Field(_)) => continue,
+                (TileMode::Flagged, TileContent::Mine)
+                | (TileMode::Revealed | TileMode::Hidden, TileContent::Field(_)) => {}
                 (TileMode::Revealed, TileContent::Mine) => {
                     tile.mode = TileMode::Revealed;
                     tile.content = TileContent::Mistake(TileMistake::TrippedMine);
                 }
-                (TileMode::Flagged, TileContent::Mine) => continue,
                 (TileMode::Hidden, TileContent::Mine) => tile.mode = TileMode::Revealed,
                 (_, TileContent::Mistake(_)) => unreachable!(),
             }
         }
-        self.state = GameState::Dead(tiles)
+        self.state = GameState::Dead(tiles);
     }
     fn move_on(&mut self) {
         match self.state {
             GameState::Blank => {
-                self.state = GameState::Alive(Tiles::new(TilesOptions {
+                self.state = GameState::Alive(Tiles::new(&TilesOptions {
                     size: self.size,
                     starting_position: self.cursor,
                     mine_count: self.mine_count,
-                }))
+                }));
             }
             GameState::Dead(_) => self.state = GameState::Blank,
             GameState::Alive(_) => unreachable!(),
@@ -140,11 +140,11 @@ impl Game {
 
         tiles.reveal(self.cursor.0, self.cursor.1);
         if let TileContent::Mine = tiles[self.cursor.0][self.cursor.1].content {
-            self.kill()
+            self.kill();
         }
     }
 
-    pub fn move_cursor(&mut self, direction: CursorDirection) {
+    pub fn move_cursor(&mut self, direction: &CursorDirection) {
         match direction {
             CursorDirection::Up => self.cursor.1 = self.cursor.1.saturating_sub(1),
             CursorDirection::Down => self.cursor.1 = self.cursor.1.saturating_add(1),
@@ -174,12 +174,16 @@ impl Tiles {
             .collect()
     }
     fn new_blank((width, height): (usize, usize)) -> Tiles {
-        Tiles(Vec::from_iter((0..width).map(|_| {
-            Vec::from_iter((0..height).map(|_| Tile {
-                mode: TileMode::Hidden,
-                content: TileContent::Field(0),
+        Tiles(
+            ((0..width).map(|_| {
+                ((0..height).map(|_| Tile {
+                    mode: TileMode::Hidden,
+                    content: TileContent::Field(0),
+                }))
+                .collect()
             }))
-        })))
+            .collect(),
+        )
     }
     fn populate_mines(&mut self, mine_count: usize, ignore: (usize, usize)) {
         let mut rng = rand::rng();
@@ -202,8 +206,7 @@ impl Tiles {
         let tile = &mut self[x][y];
         match tile.mode {
             TileMode::Hidden => tile.mode = TileMode::Revealed,
-            TileMode::Flagged => return,
-            TileMode::Revealed => return,
+            TileMode::Flagged | TileMode::Revealed => return,
         }
         let TileContent::Field(0) = tile.content else {
             return;
@@ -217,7 +220,7 @@ impl Tiles {
             self.reveal(nb_pos.0, nb_pos.1);
         }
     }
-    fn new(options: TilesOptions) -> Self {
+    fn new(options: &TilesOptions) -> Self {
         let (width, height) = options.size;
         assert!(
             width * height > options.mine_count,

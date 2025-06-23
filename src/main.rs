@@ -5,7 +5,7 @@ use color_eyre::{
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     DefaultTerminal, Frame,
-    layout::{Constraint, Direction, Layout, Margin, Rect, Size},
+    layout::{Constraint, Direction, Layout, Rect},
     style::Stylize,
     widgets::{Block, Paragraph},
 };
@@ -94,7 +94,7 @@ impl App {
             0,
             0,
             border_width * 2 + (3 * width) as u16,
-            border_width * 2 + (1 * height) as u16,
+            border_width * 2 + height as u16,
         );
 
         let border = Block::bordered()
@@ -134,8 +134,6 @@ impl App {
     fn handle_crossterm_events(&mut self) -> Result<()> {
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key_event(key),
-            Event::Mouse(_) => {}
-            Event::Resize(_, _) => {}
             _ => {}
         }
         Ok(())
@@ -144,12 +142,16 @@ impl App {
     fn on_key_event(&mut self, key: KeyEvent) {
         match (key.modifiers, key.code) {
             (_, KeyCode::Esc | KeyCode::Char('q'))
-            | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => self.quit(),
-            (_, KeyCode::Up | KeyCode::Char('w')) => self.game.move_cursor(CursorDirection::Up),
-            (_, KeyCode::Left | KeyCode::Char('a')) => self.game.move_cursor(CursorDirection::Left),
-            (_, KeyCode::Down | KeyCode::Char('s')) => self.game.move_cursor(CursorDirection::Down),
+            | (KeyModifiers::CONTROL, KeyCode::Char('c' | 'C')) => self.quit(),
+            (_, KeyCode::Up | KeyCode::Char('w')) => self.game.move_cursor(&CursorDirection::Up),
+            (_, KeyCode::Left | KeyCode::Char('a')) => {
+                self.game.move_cursor(&CursorDirection::Left);
+            }
+            (_, KeyCode::Down | KeyCode::Char('s')) => {
+                self.game.move_cursor(&CursorDirection::Down);
+            }
             (_, KeyCode::Right | KeyCode::Char('d')) => {
-                self.game.move_cursor(CursorDirection::Right)
+                self.game.move_cursor(&CursorDirection::Right);
             }
             (_, KeyCode::Char(' ')) => self.game.flag(),
             (_, KeyCode::Enter) => self.game.reveal(),
