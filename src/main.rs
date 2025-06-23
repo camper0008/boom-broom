@@ -5,12 +5,12 @@ use color_eyre::{
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     DefaultTerminal, Frame,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Margin, Rect, Size},
     style::Stylize,
     widgets::{Block, Paragraph},
 };
 
-use crate::tiles::{Tile, TileContent, TileMode, TileState, Tiles, TilesOptions};
+use crate::tiles::{CursorDirection, Game, Tile, TileContent, TileMistake, TileMode};
 mod tiles;
 
 fn main() -> Result<()> {
@@ -29,42 +29,9 @@ fn main() -> Result<()> {
     result
 }
 
-trait SomeRenderThing {
-    fn size(&self) -> (usize, usize);
-    fn tile_at(&self, x: usize, y: usize) -> &Tile;
-}
-
-impl SomeRenderThing for TileState {
-    fn size(&self) -> (usize, usize) {
-        match &self {
-            Self::Tiles(tiles) => (tiles.len(), tiles[0].len()),
-            Self::Blank { width, height } => (*width, *height),
-        }
-    }
-
-    fn tile_at(&self, x: usize, y: usize) -> &Tile {
-        match &self {
-            TileState::Blank { .. } => &Tile {
-                mode: TileMode::Hidden,
-                content: TileContent::Mine,
-            },
-            TileState::Tiles(tiles) => &tiles[x][y],
-        }
-    }
-}
-
 struct App {
     running: bool,
-    tiles: TileState,
-    mine_count: usize,
-    cursor: (usize, usize),
-}
-
-enum CursorDirection {
-    Up,
-    Left,
-    Right,
-    Down,
+    game: Game,
 }
 
 trait RenderTile {
@@ -89,6 +56,10 @@ impl RenderTile for Tile {
                 8 => "8".cyan(),
                 _ => "?".white(),
             },
+            (_, TileContent::Mistake(TileMistake::TrippedMine)) => "*".white().on_red(),
+            (_, TileContent::Mistake(TileMistake::FlaggedField(n))) => {
+                n.to_string().white().on_red()
+            }
         };
         if is_selected {
             res.underlined()
@@ -102,12 +73,7 @@ impl App {
     pub fn new(size: (usize, usize), mine_count: usize) -> Self {
         Self {
             running: false,
-            tiles: TileState::Blank {
-                width: size.0,
-                height: size.1,
-            },
-            mine_count,
-            cursor: (0, 0),
+            game: Game::new(size, mine_count),
         }
     }
 
@@ -121,13 +87,21 @@ impl App {
     }
 
     fn render(&mut self, frame: &mut Frame) {
-        let (width, height) = self.tiles.size();
+        let (width, height) = self.game.size;
+
+        let border_width = 1;
+        let size = Rect::new(
+            0,
+            0,
+            border_width * 2 + (3 * width) as u16,
+            border_width * 2 + (1 * height) as u16,
+        );
 
         let border = Block::bordered()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .title("boombroom");
 
-        let inner = border.inner(frame.area());
+        let inner = border.inner(size);
 
         let hori = Layout::default()
             .constraints((0..width).map(|_| Constraint::Length(3)))
@@ -143,9 +117,9 @@ impl App {
             for (y, hori) in vert.iter().enumerate() {
                 frame.render_widget(
                     Paragraph::new(
-                        self.tiles
+                        self.game
                             .tile_at(x, y)
-                            .render_tile(x == self.cursor.0 && y == self.cursor.1),
+                            .render_tile(x == self.game.cursor.0 && y == self.game.cursor.1),
                     )
                     .block(Block::new().on_black())
                     .centered(),
@@ -154,7 +128,7 @@ impl App {
             }
         }
 
-        frame.render_widget(border, frame.area());
+        frame.render_widget(border, size);
     }
 
     fn handle_crossterm_events(&mut self) -> Result<()> {
@@ -167,62 +141,18 @@ impl App {
         Ok(())
     }
 
-    fn try_flag(&mut self) {
-        match &mut self.tiles {
-            tiles @ TileState::Blank { .. } => {
-                *tiles = TileState::Tiles(Tiles::new(TilesOptions {
-                    size: tiles.size(),
-                    starting_position: self.cursor,
-                    mine_count: self.mine_count,
-                }));
-            }
-            TileState::Tiles(tiles) => {
-                let tile = &mut tiles[self.cursor.0][self.cursor.1];
-                tile.mode = match tile.mode {
-                    TileMode::Hidden => TileMode::Flagged,
-                    TileMode::Flagged => TileMode::Hidden,
-                    TileMode::Revealed => TileMode::Revealed,
-                }
-            }
-        }
-    }
-    fn try_reveal(&mut self) {
-        match &mut self.tiles {
-            tiles @ TileState::Blank { .. } => {
-                *tiles = TileState::Tiles(Tiles::new(TilesOptions {
-                    size: tiles.size(),
-                    starting_position: self.cursor,
-                    mine_count: self.mine_count,
-                }));
-            }
-            TileState::Tiles(tiles) => {
-                tiles.reveal(self.cursor.0, self.cursor.1);
-            }
-        }
-    }
-
-    fn move_cursor(&mut self, direction: CursorDirection) {
-        match direction {
-            CursorDirection::Up => self.cursor.1 = self.cursor.1.saturating_sub(1),
-            CursorDirection::Down => self.cursor.1 = self.cursor.1.saturating_add(1),
-            CursorDirection::Left => self.cursor.0 = self.cursor.0.saturating_sub(1),
-            CursorDirection::Right => self.cursor.0 = self.cursor.0.saturating_add(1),
-        }
-        let size = self.tiles.size();
-        self.cursor.0 = self.cursor.0.clamp(0, size.0 - 1);
-        self.cursor.1 = self.cursor.1.clamp(0, size.1 - 1);
-    }
-
     fn on_key_event(&mut self, key: KeyEvent) {
         match (key.modifiers, key.code) {
             (_, KeyCode::Esc | KeyCode::Char('q'))
             | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => self.quit(),
-            (_, KeyCode::Up | KeyCode::Char('w')) => self.move_cursor(CursorDirection::Up),
-            (_, KeyCode::Left | KeyCode::Char('a')) => self.move_cursor(CursorDirection::Left),
-            (_, KeyCode::Down | KeyCode::Char('s')) => self.move_cursor(CursorDirection::Down),
-            (_, KeyCode::Right | KeyCode::Char('d')) => self.move_cursor(CursorDirection::Right),
-            (_, KeyCode::Char(' ')) => self.try_flag(),
-            (_, KeyCode::Enter) => self.try_reveal(),
+            (_, KeyCode::Up | KeyCode::Char('w')) => self.game.move_cursor(CursorDirection::Up),
+            (_, KeyCode::Left | KeyCode::Char('a')) => self.game.move_cursor(CursorDirection::Left),
+            (_, KeyCode::Down | KeyCode::Char('s')) => self.game.move_cursor(CursorDirection::Down),
+            (_, KeyCode::Right | KeyCode::Char('d')) => {
+                self.game.move_cursor(CursorDirection::Right)
+            }
+            (_, KeyCode::Char(' ')) => self.game.flag(),
+            (_, KeyCode::Enter) => self.game.reveal(),
             _ => {}
         }
     }
