@@ -51,8 +51,8 @@ pub struct TilesOptions {
 
 enum GameState {
     Blank,
-    Ongoing(Instant, Tiles),
-    Finished(Duration, Tiles),
+    Ongoing { started: Instant, tiles: Tiles },
+    Finished { took: Duration, tiles: Tiles },
 }
 
 pub struct Game {
@@ -89,10 +89,10 @@ impl Game {
     pub fn status(&self) -> (Duration, GameStatus) {
         match &self.state {
             GameState::Blank => (Duration::from_secs(0), GameStatus::Initial),
-            GameState::Ongoing(started, _) => {
+            GameState::Ongoing { started, .. } => {
                 (Instant::now().duration_since(*started), GameStatus::Ongoing)
             }
-            GameState::Finished(took, tiles) => {
+            GameState::Finished { took, tiles } => {
                 let lost = tiles
                     .iter()
                     .flatten()
@@ -106,7 +106,8 @@ impl Game {
         }
     }
     pub fn unflagged_bombs(&self) -> i32 {
-        let (GameState::Ongoing(_, tiles) | GameState::Finished(_, tiles)) = &self.state else {
+        let (GameState::Ongoing { tiles, .. } | GameState::Finished { tiles, .. }) = &self.state
+        else {
             return self.mine_count as i32;
         };
         let flags = tiles
@@ -117,7 +118,8 @@ impl Game {
         return self.mine_count as i32 - flags;
     }
     pub fn tile_at(&self, x: usize, y: usize) -> &Tile {
-        let (GameState::Ongoing(_, tiles) | GameState::Finished(_, tiles)) = &self.state else {
+        let (GameState::Ongoing { tiles, .. } | GameState::Finished { tiles, .. }) = &self.state
+        else {
             return &Tile {
                 mode: TileMode::Hidden,
                 content: TileContent::Field(0),
@@ -126,7 +128,7 @@ impl Game {
         &tiles[x][y]
     }
     fn finish_game(&mut self) {
-        let GameState::Ongoing(time_started, tiles) = &mut self.state else {
+        let GameState::Ongoing { tiles, started } = &mut self.state else {
             unreachable!();
         };
         let mut tiles = std::mem::replace(tiles, Tiles::new_blank((0, 0)));
@@ -145,27 +147,27 @@ impl Game {
                 (_, TileContent::Mistake(_)) => unreachable!(),
             }
         }
-        let seconds_elapsed = Instant::now().duration_since(*time_started);
-        self.state = GameState::Finished(seconds_elapsed, tiles);
+        let took = Instant::now().duration_since(*started);
+        self.state = GameState::Finished { took, tiles };
     }
     fn move_on(&mut self) {
         match self.state {
             GameState::Blank => {
-                self.state = GameState::Ongoing(
-                    Instant::now(),
-                    Tiles::new(&TilesOptions {
+                self.state = GameState::Ongoing {
+                    started: Instant::now(),
+                    tiles: Tiles::new(&TilesOptions {
                         size: self.size,
                         starting_position: self.cursor,
                         mine_count: self.mine_count,
                     }),
-                );
+                };
             }
-            GameState::Finished(_, _) => self.state = GameState::Blank,
-            GameState::Ongoing(_, _) => unreachable!(),
+            GameState::Finished { .. } => self.state = GameState::Blank,
+            GameState::Ongoing { .. } => unreachable!(),
         }
     }
     fn maybe_finish(&mut self) {
-        let GameState::Ongoing(_, tiles) = &self.state else {
+        let GameState::Ongoing { tiles, .. } = &self.state else {
             unreachable!();
         };
         let has_won = tiles.iter().flatten().all(|tile| {
@@ -184,7 +186,7 @@ impl Game {
     }
 
     pub fn flag(&mut self) {
-        let GameState::Ongoing(_, tiles) = &mut self.state else {
+        let GameState::Ongoing { tiles, .. } = &mut self.state else {
             self.move_on();
             return;
         };
@@ -197,7 +199,7 @@ impl Game {
         };
     }
     pub fn reveal(&mut self) {
-        let GameState::Ongoing(_, tiles) = &mut self.state else {
+        let GameState::Ongoing { tiles, .. } = &mut self.state else {
             self.move_on();
             return;
         };
