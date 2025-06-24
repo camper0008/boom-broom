@@ -7,11 +7,12 @@ use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::Stylize,
-    widgets::{Block, Paragraph},
+    text::Line,
+    widgets::{Block, Paragraph, Widget},
 };
 
-use crate::tiles::{CursorDirection, Game, Tile, TileContent, TileMistake, TileMode};
-mod tiles;
+use crate::game::{CursorDirection, Game, Tile, TileContent, TileMistake, TileMode};
+mod game;
 
 fn main() -> Result<()> {
     let [width, height, mines]: [usize; 3] = std::env::args()
@@ -87,48 +88,69 @@ impl App {
     }
 
     fn render(&mut self, frame: &mut Frame) {
-        let (width, height) = self.game.size;
+        let (game_width, game_height) = self.game.size;
 
-        let border_width = 1;
-        let size = Rect::new(
-            0,
-            0,
-            border_width * 2 + (3 * width) as u16,
-            border_width * 2 + height as u16,
-        );
+        let board_width = 2 + (3 * game_width) as u16;
+        let board_height = 2 + game_height as u16;
 
-        let border = Block::bordered()
-            .border_type(ratatui::widgets::BorderType::Rounded)
-            .title("boombroom");
-
-        let inner = border.inner(size);
-
-        let hori = Layout::default()
-            .constraints((0..width).map(|_| Constraint::Length(3)))
-            .direction(Direction::Horizontal)
-            .split(inner);
-
-        for (x, hori) in hori.iter().enumerate() {
-            let vert = Layout::default()
-                .constraints((0..height).map(|_| Constraint::Length(1)))
-                .direction(Direction::Vertical)
-                .split(*hori);
-
-            for (y, hori) in vert.iter().enumerate() {
-                frame.render_widget(
-                    Paragraph::new(
-                        self.game
-                            .tile_at(x, y)
-                            .render_tile(x == self.game.cursor.0 && y == self.game.cursor.1),
-                    )
-                    .block(Block::new().on_black())
-                    .centered(),
-                    *hori,
-                );
+        let hud = [Line::default().spans([
+            format!("{}", self.game.unflagged_bombs()).on_red(),
+            " ".gray(),
+            match self.game.status() {
+                game::GameStatus::Initial => ":)",
+                game::GameStatus::Won => ":D",
+                game::GameStatus::Lost => ":(",
+                game::GameStatus::Ongoing => ":o",
             }
-        }
+            .white(),
+        ])];
 
-        frame.render_widget(border, size);
+        let board_area = Rect::new(
+            (frame.area().width - board_width) / 2,
+            (frame.area().height - board_height) / 2 - hud.len() as u16,
+            board_width,
+            board_height,
+        );
+        {
+            let board = Block::bordered().border_type(ratatui::widgets::BorderType::Rounded);
+            let board_inner_area = board.inner(board_area);
+
+            let hori = Layout::default()
+                .constraints((0..game_width).map(|_| Constraint::Length(3)))
+                .direction(Direction::Horizontal)
+                .split(board_inner_area);
+
+            for (x, hori) in hori.iter().enumerate() {
+                let vert = Layout::default()
+                    .constraints((0..game_height).map(|_| Constraint::Length(1)))
+                    .direction(Direction::Vertical)
+                    .split(*hori);
+
+                for (y, hori) in vert.iter().enumerate() {
+                    frame.render_widget(
+                        Paragraph::new(
+                            self.game
+                                .tile_at(x, y)
+                                .render_tile(x == self.game.cursor.0 && y == self.game.cursor.1),
+                        )
+                        .block(Block::new().on_black())
+                        .centered(),
+                        *hori,
+                    );
+                }
+            }
+            frame.render_widget(board, board_area);
+        }
+        let text_y = board_area.y + board_area.height;
+        for (offset, hud) in hud.iter().enumerate() {
+            let area = Rect::new(
+                (frame.area().width - hud.width() as u16) / 2,
+                text_y + offset as u16,
+                hud.width() as u16,
+                1,
+            );
+            frame.render_widget(hud, area);
+        }
     }
 
     fn handle_crossterm_events(&mut self) -> Result<()> {
