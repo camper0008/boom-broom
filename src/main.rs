@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Stylize,
     text::Line,
-    widgets::{Block, Paragraph, Widget},
+    widgets::{Block, Paragraph},
 };
 
 use crate::game::{CursorDirection, Game, Tile, TileContent, TileMistake, TileMode};
@@ -23,8 +23,7 @@ fn main() -> Result<()> {
         .map_err(|_| eyre!("should only give two size parameters and one mine count parameter"))?;
 
     color_eyre::install()?;
-    let mut terminal = ratatui::init();
-    terminal.hide_cursor()?;
+    let terminal = ratatui::init();
     let result = App::new((width, height), mines).run(terminal);
     ratatui::restore();
     result
@@ -80,6 +79,7 @@ impl App {
 
     pub fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
         self.running = true;
+        terminal.hide_cursor()?;
         while self.running {
             terminal.draw(|frame| self.render(frame))?;
             self.handle_crossterm_events()?;
@@ -93,10 +93,16 @@ impl App {
         let board_width = 2 + (3 * game_width) as u16;
         let board_height = 2 + game_height as u16;
 
+        let (time, status) = self.game.status();
+        let secs = time.as_secs() % 60;
+        let mins = (time.as_secs() - secs) / 60;
+
         let hud = [Line::default().spans([
+            format!("{mins}:{secs:02}").white(),
+            " ".gray(),
             format!("{}", self.game.unflagged_bombs()).on_red(),
             " ".gray(),
-            match self.game.status() {
+            match status {
                 game::GameStatus::Initial => ":)",
                 game::GameStatus::Won => ":D",
                 game::GameStatus::Lost => ":(",
@@ -154,6 +160,9 @@ impl App {
     }
 
     fn handle_crossterm_events(&mut self) -> Result<()> {
+        if !event::poll(std::time::Duration::from_millis(50))? {
+            return Ok(());
+        }
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key_event(key),
             _ => {}

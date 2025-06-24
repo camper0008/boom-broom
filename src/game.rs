@@ -1,4 +1,7 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    ops::{Deref, DerefMut},
+    time::{Duration, Instant},
+};
 
 use rand::Rng;
 
@@ -48,8 +51,8 @@ pub struct TilesOptions {
 
 enum GameState {
     Blank,
-    Ongoing(Tiles),
-    Finished(Tiles),
+    Ongoing(Instant, Tiles),
+    Finished(Duration, Tiles),
 }
 
 pub struct Game {
@@ -82,25 +85,28 @@ impl Game {
             mine_count,
         }
     }
-    pub fn status(&self) -> GameStatus {
+
+    pub fn status(&self) -> (Duration, GameStatus) {
         match &self.state {
-            GameState::Blank => GameStatus::Initial,
-            GameState::Ongoing(_) => GameStatus::Ongoing,
-            GameState::Finished(tiles) => {
+            GameState::Blank => (Duration::from_secs(0), GameStatus::Initial),
+            GameState::Ongoing(started, _) => {
+                (Instant::now().duration_since(*started), GameStatus::Ongoing)
+            }
+            GameState::Finished(took, tiles) => {
                 let lost = tiles
                     .iter()
                     .flatten()
                     .any(|tile| matches!(tile.content, TileContent::Mistake(_)));
                 if lost {
-                    GameStatus::Lost
+                    (*took, GameStatus::Lost)
                 } else {
-                    GameStatus::Won
+                    (*took, GameStatus::Won)
                 }
             }
         }
     }
     pub fn unflagged_bombs(&self) -> i32 {
-        let (GameState::Ongoing(tiles) | GameState::Finished(tiles)) = &self.state else {
+        let (GameState::Ongoing(_, tiles) | GameState::Finished(_, tiles)) = &self.state else {
             return self.mine_count as i32;
         };
         let flags = tiles
@@ -111,7 +117,7 @@ impl Game {
         return self.mine_count as i32 - flags;
     }
     pub fn tile_at(&self, x: usize, y: usize) -> &Tile {
-        let (GameState::Ongoing(tiles) | GameState::Finished(tiles)) = &self.state else {
+        let (GameState::Ongoing(_, tiles) | GameState::Finished(_, tiles)) = &self.state else {
             return &Tile {
                 mode: TileMode::Hidden,
                 content: TileContent::Field(0),
@@ -120,7 +126,7 @@ impl Game {
         &tiles[x][y]
     }
     fn finish_game(&mut self) {
-        let GameState::Ongoing(tiles) = &mut self.state else {
+        let GameState::Ongoing(time_started, tiles) = &mut self.state else {
             unreachable!();
         };
         let mut tiles = std::mem::replace(tiles, Tiles::new_blank((0, 0)));
@@ -139,35 +145,46 @@ impl Game {
                 (_, TileContent::Mistake(_)) => unreachable!(),
             }
         }
-        self.state = GameState::Finished(tiles);
+        let seconds_elapsed = Instant::now().duration_since(*time_started);
+        self.state = GameState::Finished(seconds_elapsed, tiles);
     }
     fn move_on(&mut self) {
         match self.state {
             GameState::Blank => {
-                self.state = GameState::Ongoing(Tiles::new(&TilesOptions {
-                    size: self.size,
-                    starting_position: self.cursor,
-                    mine_count: self.mine_count,
-                }));
+                self.state = GameState::Ongoing(
+                    Instant::now(),
+                    Tiles::new(&TilesOptions {
+                        size: self.size,
+                        starting_position: self.cursor,
+                        mine_count: self.mine_count,
+                    }),
+                );
             }
-            GameState::Finished(_) => self.state = GameState::Blank,
-            GameState::Ongoing(_) => unreachable!(),
+            GameState::Finished(_, _) => self.state = GameState::Blank,
+            GameState::Ongoing(_, _) => unreachable!(),
         }
     }
-    fn maybe_win(&mut self) {
-        let GameState::Ongoing(tiles) = &self.state else {
+    fn maybe_finish(&mut self) {
+        let GameState::Ongoing(_, tiles) = &self.state else {
             unreachable!();
         };
         let has_won = tiles.iter().flatten().all(|tile| {
             !matches!(tile.content, TileContent::Field(_))
                 || matches!(tile.mode, TileMode::Revealed)
         });
-        if has_won {
+        let has_lost = tiles.iter().flatten().any(|tile| {
+            matches!(
+                (&tile.mode, &tile.content),
+                (TileMode::Revealed, TileContent::Mine)
+            )
+        });
+        if has_won || has_lost {
             self.finish_game();
         }
     }
+
     pub fn flag(&mut self) {
-        let GameState::Ongoing(tiles) = &mut self.state else {
+        let GameState::Ongoing(_, tiles) = &mut self.state else {
             self.move_on();
             return;
         };
@@ -178,20 +195,14 @@ impl Game {
             TileMode::Flagged => TileMode::Hidden,
             TileMode::Revealed => TileMode::Revealed,
         };
-        self.maybe_win();
     }
     pub fn reveal(&mut self) {
-        let GameState::Ongoing(tiles) = &mut self.state else {
+        let GameState::Ongoing(_, tiles) = &mut self.state else {
             self.move_on();
             return;
         };
-
         tiles.reveal(self.cursor.0, self.cursor.1);
-        if let TileContent::Mine = tiles[self.cursor.0][self.cursor.1].content {
-            self.finish_game();
-            return;
-        };
-        self.maybe_win();
+        self.maybe_finish();
     }
 
     pub fn move_cursor(&mut self, direction: &CursorDirection) {
@@ -255,14 +266,28 @@ impl Tiles {
     fn reveal(&mut self, x: usize, y: usize) {
         let tile = &mut self[x][y];
         match tile.mode {
-            TileMode::Hidden => tile.mode = TileMode::Revealed,
-            TileMode::Flagged | TileMode::Revealed => return,
+            TileMode::Hidden => {
+                tile.mode = TileMode::Revealed;
+                let TileContent::Field(0) = tile.content else {
+                    return;
+                };
+            }
+            TileMode::Flagged => return,
+            TileMode::Revealed => {
+                let TileContent::Field(mines) = tile.content else {
+                    unreachable!()
+                };
+                let flags = self
+                    .neighbours(x, y)
+                    .iter()
+                    .filter(|(x, y)| matches!(self[*x][*y].mode, TileMode::Flagged))
+                    .count();
+                if mines != flags as u8 {
+                    return;
+                }
+            }
         }
-        let TileContent::Field(0) = tile.content else {
-            return;
-        };
-        let nbs = self.neighbours(x, y);
-        for nb_pos in nbs {
+        for nb_pos in self.neighbours(x, y) {
             let tile = &self[nb_pos.0][nb_pos.1];
             let TileMode::Hidden = tile.mode else {
                 continue;
