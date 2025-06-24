@@ -100,7 +100,7 @@ impl App {
         let hud = [Line::default().spans([
             format!("{mins}:{secs:02}").white(),
             " ".gray(),
-            format!("{}", self.game.unflagged_bombs()).on_red(),
+            format!("{:3}", self.game.unflagged_bombs()).on_red(),
             " ".gray(),
             match status {
                 game::GameStatus::Initial => ":)",
