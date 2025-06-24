@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Stylize,
     text::Line,
-    widgets::{Block, Paragraph},
+    widgets::{Block, Paragraph, Wrap},
 };
 
 use crate::game::{CursorDirection, Game, Tile, TileContent, TileMistake, TileMode};
@@ -43,7 +43,7 @@ impl RenderTile for Tile {
         let res = match (&self.mode, &self.content) {
             (TileMode::Hidden, _) => "-".white(),
             (TileMode::Flagged, _) => "î".red(),
-            (TileMode::Revealed, TileContent::Mine) => "*".black(),
+            (TileMode::Revealed, TileContent::Mine) => "*".on_gray().black(),
             (TileMode::Revealed, TileContent::Field(n)) => match n {
                 0 => " ".white(),
                 1 => "1".magenta(),
@@ -111,6 +111,28 @@ impl App {
             .white(),
         ])];
 
+        if frame.area().width < board_width {
+            let text = Paragraph::new(format!(
+                "Tried to draw a {} unit wide board in a {} unit wide frame",
+                board_width,
+                frame.area().width
+            ))
+            .centered()
+            .wrap(Wrap { trim: true });
+            frame.render_widget(text, frame.area());
+            return;
+        } else if frame.area().height < board_height + 2 * hud.len() as u16 {
+            let text = Paragraph::new(format!(
+                "Tried to draw a {} unit tall board in a {} unit tall frame",
+                board_height + 2 * hud.len() as u16,
+                frame.area().height
+            ))
+            .centered()
+            .wrap(Wrap { trim: true });
+            frame.render_widget(text, frame.area());
+            return;
+        }
+
         let board_area = Rect::new(
             (frame.area().width - board_width) / 2,
             (frame.area().height - board_height) / 2 - hud.len() as u16,
@@ -160,7 +182,7 @@ impl App {
     }
 
     fn handle_crossterm_events(&mut self) -> Result<()> {
-        if !event::poll(std::time::Duration::from_millis(50))? {
+        if !event::poll(std::time::Duration::from_millis(500))? {
             return Ok(());
         }
         match event::read()? {

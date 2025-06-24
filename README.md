@@ -19,3 +19,4 @@ remaining features
 - [x] time
 - [x] reveal neighbours of tile if tile with N bombs and N flags is tripped
 - [ ] configuring parameters from tui instead of cli
+- [ ] scrollable view if board is larger than frame

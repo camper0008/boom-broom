@@ -267,34 +267,43 @@ impl Tiles {
     }
     fn reveal(&mut self, x: usize, y: usize) {
         let tile = &mut self[x][y];
+        let TileContent::Field(mines) = tile.content else {
+            unreachable!()
+        };
+
         match tile.mode {
+            TileMode::Flagged => return,
             TileMode::Hidden => {
                 tile.mode = TileMode::Revealed;
-                let TileContent::Field(0) = tile.content else {
+                if mines != 0 {
                     return;
-                };
+                }
+                for nb_pos in self.neighbours(x, y) {
+                    let tile = &mut self[nb_pos.0][nb_pos.1];
+                    let (TileMode::Hidden | TileMode::Flagged) = tile.mode else {
+                        continue;
+                    };
+                    tile.mode = TileMode::Hidden;
+                    self.reveal(nb_pos.0, nb_pos.1);
+                }
             }
-            TileMode::Flagged => return,
             TileMode::Revealed => {
-                let TileContent::Field(mines) = tile.content else {
-                    unreachable!()
-                };
                 let flags = self
                     .neighbours(x, y)
                     .iter()
                     .filter(|(x, y)| matches!(self[*x][*y].mode, TileMode::Flagged))
-                    .count();
-                if mines != flags as u8 {
+                    .count() as u8;
+                if mines != flags {
                     return;
                 }
+                for nb_pos in self.neighbours(x, y) {
+                    let tile = &self[nb_pos.0][nb_pos.1];
+                    let TileMode::Hidden = tile.mode else {
+                        continue;
+                    };
+                    self.reveal(nb_pos.0, nb_pos.1);
+                }
             }
-        }
-        for nb_pos in self.neighbours(x, y) {
-            let tile = &self[nb_pos.0][nb_pos.1];
-            let TileMode::Hidden = tile.mode else {
-                continue;
-            };
-            self.reveal(nb_pos.0, nb_pos.1);
         }
     }
     fn new(options: &TilesOptions) -> Self {
