@@ -278,13 +278,13 @@ impl Tiles {
                 if mines != 0 {
                     return;
                 }
-                for nb_pos in self.neighbours(x, y) {
-                    let tile = &mut self[nb_pos.0][nb_pos.1];
+                for (x, y) in self.neighbours(x, y) {
+                    let tile = &mut self[x][y];
                     let (TileMode::Hidden | TileMode::Flagged) = tile.mode else {
                         continue;
                     };
                     tile.mode = TileMode::Hidden;
-                    self.reveal(nb_pos.0, nb_pos.1);
+                    self.reveal(x, y);
                 }
             }
             TileMode::Revealed => {
@@ -296,12 +296,12 @@ impl Tiles {
                 if mines != flags {
                     return;
                 }
-                for nb_pos in self.neighbours(x, y) {
-                    let tile = &self[nb_pos.0][nb_pos.1];
+                for (x, y) in self.neighbours(x, y) {
+                    let tile = &self[x][y];
                     let TileMode::Hidden = tile.mode else {
                         continue;
                     };
-                    self.reveal(nb_pos.0, nb_pos.1);
+                    self.reveal(x, y);
                 }
             }
         }
